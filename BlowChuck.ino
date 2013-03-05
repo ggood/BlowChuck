@@ -1,16 +1,35 @@
+/**
+Copyright (c) 2012, Gordon S. Good (velo27 [at] yahoo [dot] com)
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+    * Redistributions of source code must retain the above copyright
+      notice, this list of conditions and the following disclaimer.
+    * Redistributions in binary form must reproduce the above copyright
+      notice, this list of conditions and the following disclaimer in the
+      documentation and/or other materials provided with the distribution.
+    * The author's name may not be used to endorse or promote products
+      derived from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL GORDON S. GOOD BE LIABLE FOR ANY
+DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+ 
 #include "Wire.h"
 #include "WiiChuck.h"
 
-/*
-Notes: 3/3/13 - switched scene launch to happen when both
-Z and C buttons released, rather than by shaking the
-nunchuck.
-
-
-
-*/
 // The MIDI channel on which we send note data from
-// breath actions
+// breath actions, as well as continuous controller
+// data.
 #define MIDI_CHANNEL 1
 // The MIDI channel we use for Ableton Live control
 #define SCENE_MGMT_MIDI_CHANNEL 2
@@ -82,17 +101,30 @@ void setup() {
   state = NOTE_OFF;  // initialize state machine
   // Initialize the nunchuck-related things
   prevButtonState = buttonState = 0;
-  chuck.begin();
+  chuck.begin();  
 }
 
+
+// ================
+// Note selection
+// ================
 int get_note() {
   return notes[random(0,4)];
 }
+
+
+// ================
+// Breath sensor, note on/off, MIDI breath controller routines
+// ================
 
 int get_velocity(int initial, int final, unsigned long time_delta) {
   //return map(final, NOTE_ON_THRESHOLD, MAX_PRESSURE, 0, 127);
   return map(constrain(final, NOTE_ON_THRESHOLD, MAX_PRESSURE), NOTE_ON_THRESHOLD, MAX_PRESSURE, 0, 127);
 }
+
+// ================
+// Button/Ableton Scene Management Routines
+// ================
 
 // TODO(ggood) rewrite in terms of bit shift operations
 byte get_button_state() {
@@ -126,26 +158,7 @@ void scene_launch() {
   usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
 }
 
-void loop() {
-  // Process nuncheck data
-  chuck.update(); 
-  delay(1);
-
-  // Deal with accelerometer
-  zVal = chuck.readAccelZ();
-  zSum -= zValues[i];
-  zSum += zVal;
-  zValues[i] = zVal;
-  i = (i + 1) % 10;
-  zAvg = zSum / 10;
-  if (zAvg > 500) {
-    if (millis() - noteOnTime > SCENE_LAUNCH_DELAY) {
-      //usbMIDI.sendNoteOn(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-      //usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-      //noteOnTime = millis();
-    }
-  }
-
+void handle_scene_launch() {
   // Check for scene up/down and launch. All actions occur on
   // button release.
   prevButtonState = buttonState;
@@ -170,6 +183,36 @@ void loop() {
       }
     }
   }
+}
+
+// ================
+// Pitch/Roll mapping to MIDI continuous controllers
+// ================
+
+void loop() {
+  // Process nuncheck data
+  chuck.update(); 
+  delay(1);
+
+  // Deal with accelerometer
+  zVal = chuck.readAccelZ();
+  zSum -= zValues[i];
+  zSum += zVal;
+  zValues[i] = zVal;
+  i = (i + 1) % 10;
+  zAvg = zSum / 10;
+  if (zAvg > 500) {
+    if (millis() - noteOnTime > SCENE_LAUNCH_DELAY) {
+      //usbMIDI.sendNoteOn(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+      //usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+      //noteOnTime = millis();
+    }
+  }
+  
+  // Read pitch/roll data from Nunchuck and send MIDI Continuous
+  // Controller data.
+
+  handle_scene_launch();
 
   // Process pressure sensor data
   // read the input on analog pin 0
