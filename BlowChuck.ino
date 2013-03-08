@@ -1,29 +1,29 @@
 /**
-Copyright (c) 2012, Gordon S. Good (velo27 [at] yahoo [dot] com)
-All rights reserved.
-
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
-    * Redistributions of source code must retain the above copyright
-      notice, this list of conditions and the following disclaimer.
-    * Redistributions in binary form must reproduce the above copyright
-      notice, this list of conditions and the following disclaimer in the
-      documentation and/or other materials provided with the distribution.
-    * The author's name may not be used to endorse or promote products
-      derived from this software without specific prior written permission.
-
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
-ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
-WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL GORDON S. GOOD BE LIABLE FOR ANY
-DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
-(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
-LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
-ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
-SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ * Copyright (c) 2012, Gordon S. Good (velo27 [at] yahoo [dot] com)
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * Redistributions of source code must retain the above copyright
+ * notice, this list of conditions and the following disclaimer.
+ * Redistributions in binary form must reproduce the above copyright
+ * notice, this list of conditions and the following disclaimer in the
+ * documentation and/or other materials provided with the distribution.
+ * The author's name may not be used to endorse or promote products
+ * derived from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL GORDON S. GOOD BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 #include "Wire.h"
 #include "WiiChuck.h"
 
@@ -50,6 +50,15 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // blowing into the tube.
 #define MAX_PRESSURE 500
 
+// MIDI breath controller number
+#define BREATH_CONTROLLER 2
+// MIDI controller number for nunchuck roll sensor
+#define CHUCK_ROLL_CONTROLLER 17  // 17 = General Purpose Slider 2
+// TODO(ggood) - the Teensy doesn't want to seem to send any
+// messages on GP Slider 1 (CC 16) - huh?
+// MIDI controller number for nunchuck pitch sensor
+#define CHUCK_PITCH_CONTROLLER 18  // 18 = General Purpose Slider 3
+
 // The three states of our state machine
 // No note is sounding
 #define NOTE_OFF 1
@@ -59,17 +68,34 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define RISE_TIME 10
 // A note is sounding
 #define NOTE_ON 3
-// Send aftertouch data no more than every AT_INTERVAL
+// Send breath controller data no more than every AT_INTERVAL
 // milliseconds
-#define AT_INTERVAL 70
+#define BC_INTERVAL 70
+// Send continuous controller data no more than every CC_INTERVAL
+// milliseconds
+#define CC_INTERVAL 70
 
-// The five notes, from which we choose one at random
-unsigned int notes[5] = {
-  60, 62, 65, 67, 69};
+// The nine notes that the player selects using the joystick
+unsigned int notes[9] = {
+  60, 62, 65, 67, 69, 72, 74, 77, 79};
+
+// Mappings from joystick regions
+#define CENTER 0
+#define NORTH 1
+#define NORTHEAST 2
+#define EAST 3
+#define SOUTHEAST 4
+#define SOUTH 5
+#define SOUTHWEST 6
+#define WEST 7
+#define NORTHWEST 8
 
 // We keep track of which note is sounding, so we know
 // which note to turn off when breath stops.
 int noteSounding;
+// This is the selected note, which may be different than
+// the currently sounding note
+int selectedNote;
 // The value read from the sensor
 int sensorValue;
 // The state of our state machine
@@ -78,10 +104,12 @@ int state;
 unsigned long breath_on_time = 0L;
 // The breath value at the time we observed the transition
 int initial_breath_value;
-// The aftertouch value we will send
-int atVal;
-// The last time we sent an aftertouch value
-unsigned long atSendTime = 0L;
+// The breath controller value we will send
+int bcVal;
+// The last time we sent a breath controller value
+unsigned long bcSendTime = 0L;
+// The last time we sent a MIDI CC value
+unsigned long ccSendTime = 0L;
 
 // The nunchuck object
 WiiChuck chuck = WiiChuck(); // The nunchuck controller
@@ -92,7 +120,8 @@ byte prevButtonState = 0;
 boolean sceneLaunchArmed;
 // Accelerometer history
 int xVal, yVal, zVal, zSum, zAvg;
-int zValues[10] = {0};
+int zValues[10] = {
+  0};
 unsigned long noteOnTime;
 int i;
 
@@ -108,10 +137,60 @@ void setup() {
 // ================
 // Note selection
 // ================
-int get_note() {
+int OLDget_note() {
   return notes[random(0,4)];
 }
 
+byte get_direction(int x_dir, int y_dir) {
+  if (x_dir < 0) {
+    if (y_dir < 0) {
+      return SOUTHWEST;
+    } else if (y_dir > 0) {
+      return NORTHWEST;
+    } else {
+      return WEST;
+    }
+  } else if (x_dir > 0) {
+    if (y_dir < 0) {
+      return SOUTHEAST;
+    } else if (y_dir > 0) {
+      return NORTHEAST; // OK
+    } else {
+      return EAST;  // OK
+    }
+  } else {
+    if (y_dir < 0) {
+      return SOUTH;
+    } else if (y_dir > 0) {
+      return NORTH;  // OK
+    } else {
+      return CENTER;  // OK
+    }
+  }
+}
+
+int get_note() {
+#define ZERO_TOLERANCE 10
+  // Read joystick
+  int x = chuck.readJoyX();
+  int y = chuck.readJoyY();
+  int x_dir, y_dir = 0;
+  
+  // Map x and y to a direction (-1, 0, 1)
+  if (abs(x) < ZERO_TOLERANCE) {
+    x_dir = 0;
+  } else {
+    x_dir = x > 0 ? 1 : -1;
+  }
+  if (abs(y) < ZERO_TOLERANCE) {
+    y_dir = 0;
+  } else {
+    y_dir = y > 0 ? 1 : -1;
+  }
+  // Now map pairs of x, y directions to a note
+  byte direction = get_direction(x_dir, y_dir);
+  return notes[direction];
+}
 
 // ================
 // Breath sensor, note on/off, MIDI breath controller routines
@@ -122,98 +201,7 @@ int get_velocity(int initial, int final, unsigned long time_delta) {
   return map(constrain(final, NOTE_ON_THRESHOLD, MAX_PRESSURE), NOTE_ON_THRESHOLD, MAX_PRESSURE, 0, 127);
 }
 
-// ================
-// Button/Ableton Scene Management Routines
-// ================
-
-// TODO(ggood) rewrite in terms of bit shift operations
-byte get_button_state() {
-  if (chuck.buttonC) {
-    if (chuck.buttonZ) {
-      return 0x03;
-    } else {
-      return 0x02;
-    }
-  } else {
-    if (chuck.buttonZ) {
-      return 0x01;
-    } else {
-      return 0x0;
-    }
-  }
-}
-
-void scene_next() {
-  usbMIDI.sendNoteOn(SCENE_NEXT_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-  usbMIDI.sendNoteOff(SCENE_NEXT_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-}
-
-void scene_prev() {
-  usbMIDI.sendNoteOn(SCENE_PREV_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-  usbMIDI.sendNoteOff(SCENE_PREV_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL); 
-}
-
-void scene_launch() {
-  usbMIDI.sendNoteOn(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-  usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-}
-
-void handle_scene_launch() {
-  // Check for scene up/down and launch. All actions occur on
-  // button release.
-  prevButtonState = buttonState;
-  buttonState = get_button_state();
-  sceneLaunchArmed = (buttonState == 0x03) || sceneLaunchArmed;
-  if (buttonState == 0x0) {
-    if (sceneLaunchArmed) {
-      scene_launch();
-      sceneLaunchArmed = false;
-    } else if (prevButtonState != buttonState) {
-      // Button state transitioned
-      switch (prevButtonState) {
-      case 0x01:
-        scene_next();
-        break;
-      case 0x02:
-        scene_prev();
-        break;
-      case 0x03:
-        //scene_launch();
-        break;
-      }
-    }
-  }
-}
-
-// ================
-// Pitch/Roll mapping to MIDI continuous controllers
-// ================
-
-void loop() {
-  // Process nuncheck data
-  chuck.update(); 
-  delay(1);
-
-  // Deal with accelerometer
-  zVal = chuck.readAccelZ();
-  zSum -= zValues[i];
-  zSum += zVal;
-  zValues[i] = zVal;
-  i = (i + 1) % 10;
-  zAvg = zSum / 10;
-  if (zAvg > 500) {
-    if (millis() - noteOnTime > SCENE_LAUNCH_DELAY) {
-      //usbMIDI.sendNoteOn(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-      //usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
-      //noteOnTime = millis();
-    }
-  }
-  
-  // Read pitch/roll data from Nunchuck and send MIDI Continuous
-  // Controller data.
-
-  handle_scene_launch();
-
+void handle_breath_sensor() {
   // Process pressure sensor data
   // read the input on analog pin 0
   sensorValue = analogRead(A0);
@@ -245,20 +233,134 @@ void loop() {
     }
   } 
   else if (state == NOTE_ON) {
+    byte newNote = get_note();
+    if (newNote != noteSounding) {
+      usbMIDI.sendNoteOff(noteSounding, 127, MIDI_CHANNEL);
+      state = NOTE_OFF;
+      noteSounding = newNote;
+      handle_breath_sensor();
+    }
     if (sensorValue < NOTE_ON_THRESHOLD) {
       // Value has fallen below threshold - turn the note off
       usbMIDI.sendNoteOff(noteSounding, 100, MIDI_CHANNEL);  
       state = NOTE_OFF;
-    } 
-    else {
-      // Is it time to send more aftertouch data?
-      if (millis() - atSendTime > AT_INTERVAL) {
-        // Map the sensor value to the aftertouch range 0-127
-        atVal = map(sensorValue, NOTE_ON_THRESHOLD, 1023, 0, 127);
-        usbMIDI.sendAfterTouch(atVal, MIDI_CHANNEL);
-        atSendTime = millis();
+    } else {
+      // Is it time to send more breath controller data?
+      if (millis() - bcSendTime > BC_INTERVAL) {
+        // Map the sensor value to the breath controller range 0-127
+        bcVal = map(sensorValue, NOTE_ON_THRESHOLD, 1023, 0, 127);
+        usbMIDI.sendControlChange(BREATH_CONTROLLER, bcVal, MIDI_CHANNEL);
+        bcSendTime = millis();
       }
     }
   }
 }
+
+// ================
+// Button/Ableton Scene Management Routines
+// ================
+
+// TODO(ggood) rewrite in terms of bit shift operations
+byte get_button_state() {
+  if (chuck.buttonC) {
+    if (chuck.buttonZ) {
+      return 0x03;
+    } 
+    else {
+      return 0x02;
+    }
+  } 
+  else {
+    if (chuck.buttonZ) {
+      return 0x01;
+    } 
+    else {
+      return 0x0;
+    }
+  }
+}
+
+void scene_next() {
+  usbMIDI.sendNoteOn(SCENE_NEXT_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+  usbMIDI.sendNoteOff(SCENE_NEXT_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+}
+
+void scene_prev() {
+  usbMIDI.sendNoteOn(SCENE_PREV_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+  usbMIDI.sendNoteOff(SCENE_PREV_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL); 
+}
+
+void scene_launch() {
+  usbMIDI.sendNoteOn(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+  usbMIDI.sendNoteOff(SCENE_LAUNCH_MIDI_NOTE, 100, SCENE_MGMT_MIDI_CHANNEL);
+}
+
+void handle_joystick() {
+  selectedNote = get_note();
+  if (state == NOTE_ON && selectedNote != noteSounding) {
+    // player moved joystick to a new position. Turn off
+    // current note and turn on new one.
+    handle_breath_sensor();
+  }
+}
+
+void handle_scene_launch() {
+  // Check for scene up/down and launch. All actions occur on
+  // button release.
+  prevButtonState = buttonState;
+  buttonState = get_button_state();
+  sceneLaunchArmed = (buttonState == 0x03) || sceneLaunchArmed;
+  if (buttonState == 0x0) {
+    if (sceneLaunchArmed) {
+      scene_launch();
+      sceneLaunchArmed = false;
+    } 
+    else if (prevButtonState != buttonState) {
+      // Button state transitioned
+      switch (prevButtonState) {
+      case 0x01:
+        scene_next();
+        break;
+      case 0x02:
+        scene_prev();
+        break;
+      case 0x03:
+        //scene_launch();
+        break;
+      }
+    }
+  }
+}
+
+// ================
+// Pitch/Roll mapping to MIDI continuous controllers
+// ================
+
+void handle_pitch_roll() {
+  byte ccValRoll;
+  byte ccValPitch;
+  // Is it time to send more CC data?
+  if (millis() - ccSendTime > CC_INTERVAL) {
+    // Map the CC values from the nunchuck
+    ccValRoll = map(chuck.readRoll(), -180, 180, 0, 127);
+    usbMIDI.sendControlChange(CHUCK_ROLL_CONTROLLER, ccValRoll, MIDI_CHANNEL);
+    chuck.update();
+    delay(1);
+    ccValPitch = map(chuck.readPitch(), 0, 140, 0, 127);
+    usbMIDI.sendControlChange(CHUCK_PITCH_CONTROLLER, ccValPitch, MIDI_CHANNEL);
+    ccSendTime = millis();
+  }
+}
+
+void loop() {
+  // Process nunchuck data
+  chuck.update(); 
+  delay(1);
+
+  handle_breath_sensor();
+  handle_joystick();
+  handle_pitch_roll();
+  handle_scene_launch();
+}
+
 
