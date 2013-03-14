@@ -24,8 +24,8 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include "Wire.h"
-#include "WiiChuck.h"
+#include <i2c_t3.h>
+#include "WiiChuckTeensy3.h"
 
 // The MIDI channel on which we send note data from
 // breath actions, as well as continuous controller
@@ -112,7 +112,7 @@ unsigned long bcSendTime = 0L;
 unsigned long ccSendTime = 0L;
 
 // The nunchuck object
-WiiChuck chuck = WiiChuck(); // The nunchuck controller
+WiiChuckTeensy3 chuck = WiiChuckTeensy3(); // The nunchuck controller
 // Current button state from nunchuck
 byte buttonState = 0;
 byte prevButtonState = 0;
@@ -130,7 +130,7 @@ void setup() {
   state = NOTE_OFF;  // initialize state machine
   // Initialize the nunchuck-related things
   prevButtonState = buttonState = 0;
-  chuck.begin();  
+  chuck.begin(I2C_SECONDARY);  
 }
 
 

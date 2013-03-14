@@ -30,14 +30,18 @@
  * Conversion to Arduino 1.0 by Danjovic
  * http://hotbit.blogspot.com 
  * 
+ *
+ * Modified to use the i2c_t3 library from Brian "nox771"
+ * (http://forum.pjrc.com/threads/21680-New-I2C-library-for-Teensy3)
+ * which enables use of both i2c buses on the Teensy 3.
  */
 
-#ifndef WiiChuck_h
-#define WiiChuck_h
+#ifndef WiiChuckTeensy3_h
+#define WiiChuckTeensy3_h
 
 
 #include "Arduino.h"
-#include <Wire.h>
+#include <i2c_t3.h>
 #include <math.h>
 
 
@@ -50,9 +54,9 @@
 #define DEFAULT_ZERO_JOY_X 124
 #define DEFAULT_ZERO_JOY_Y 132
 
+enum i2c_bus {I2C_PRIMARY, I2C_SECONDARY};
 
-
-class WiiChuck {
+class WiiChuckTeensy3 {
     private:
         uint8_t cnt;
         uint8_t status[6];		// array to store wiichuck output
@@ -75,9 +79,15 @@ class WiiChuck {
         uint8_t joyY;
         bool buttonZ;
         bool buttonC;
-        void begin() 
+        
+        void begin() {
+          begin(I2C_PRIMARY);
+        };
+        
+        void begin(i2c_bus bus) 
         {
-            Wire.begin();
+            i2c_pins t3_i2c_bus = bus == I2C_PRIMARY ? I2C_PINS_18_19 : I2C_PINS_16_17;
+            Wire.begin(I2C_MASTER, 0, t3_i2c_bus, I2C_PULLUP_EXT, I2C_RATE_100);
             cnt = 0;
             averageCounter = 0;
             // instead of the common 0x40 -> 0x00 initialization, we
@@ -228,3 +238,4 @@ class WiiChuck {
 
 
 #endif
+
