@@ -40,8 +40,11 @@ Future Ideas:
 - Utilize a second Nunchuck controller. This turns out to
   be difficult since every Nunchuck has the same I2C bus
   address. It may be possible on a microcontroller platform
-  with more than one I2C bus.
+  with more than one I2C bus. NOTE: this work is partially
+  complete now. I found a replacement i2c library which
+  can utilize the second i2c bus on the Teensy 3, so I'll
+  soon be adding support for the second Nunchuck.
 
 The BlowChuck.ino file is licensed with a BSD-style license.
-The WiiChuck.h file is based on work found on the Internet,
-and is not covered by the BlowChuck.ino file's license.
+The WiiChuckTeensy3.h file is based on work found on the
+Internet,and is not covered by the BlowChuck.ino file's license.
